@@ -18,6 +18,7 @@ from src.genie.data_module import RAMSDataModule
 from src.genie.ACE_data_module import ACEDataModule
 from src.genie.KAIROS_data_module import KAIROSDataModule 
 from src.genie.model import GenIEModel 
+from src.genie.model_enc import EncIEModel
 
 
 logger = logging.getLogger(__name__)
@@ -31,7 +32,7 @@ def main():
         "--model", 
         type=str, 
         required=True,
-        choices=['gen','constrained-gen']
+        choices=['gen','constrained-gen','padded','oracle']
     )
     parser.add_argument(
         "--dataset",
@@ -111,6 +112,7 @@ def main():
         help="Whether to use 16-bit (mixed) precision (through NVIDIA apex) instead of 32-bit",
     )
     parser.add_argument("--threads", type=int, default=1, help="multiple threads for converting example to features")
+    parser.add_argument("--pad", type=int, default=1, help = "arg span for padded encoder version, default is 1 for single version")
     args = parser.parse_args()
 
     # Setup logging
@@ -152,7 +154,12 @@ def main():
     lr_logger = LearningRateMonitor() 
     tb_logger = TensorBoardLogger('logs/')
 
-    model = GenIEModel(args)
+
+    if args.model in ['gen','constrained-gen']:
+        model = GenIEModel(args)
+    else:
+        model = EncIEModel(args)
+
     if args.dataset == 'RAMS':
         dm = RAMSDataModule(args)
     elif args.dataset == 'ACE':
@@ -160,12 +167,8 @@ def main():
     elif args.dataset == 'KAIROS':
         dm = KAIROSDataModule(args)
 
-
-
     if args.max_steps < 0 :
         args.max_epochs = args.min_epochs = args.num_train_epochs 
-    
-    
 
     trainer = Trainer(
         logger=tb_logger,

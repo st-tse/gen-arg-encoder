@@ -6,16 +6,15 @@ import json
 
 
 import pytorch_lightning as pl 
-from transformers import BartTokenizer, BartConfig
+from transformers import BartTokenizer, BartConfig, BertForMaskedLM, BertTokenizerFast
 from transformers import AdamW, get_linear_schedule_with_warmup
 
 from .network import BartGen
 from .constrained_gen import BartConstrainedGen
-# from .encoder import 
 
 logger = logging.getLogger(__name__)
 
-class GenIEModel(pl.LightningModule):
+class EncIEModel(pl.LightningModule):
     def __init__(self, args):
         super().__init__() 
         self.hparams = args 

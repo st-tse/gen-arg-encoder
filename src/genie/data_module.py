@@ -6,7 +6,7 @@ from collections import defaultdict
 import argparse 
 
 import transformers 
-from transformers import BartTokenizer
+from transformers import BartTokenizer, BertTokenizerFast
 import torch 
 from torch.utils.data import DataLoader 
 import pytorch_lightning as pl 
@@ -21,7 +21,13 @@ class RAMSDataModule(pl.LightningDataModule):
     def __init__(self, args):
         super().__init__() 
         self.hparams = args 
-        self.tokenizer = BartTokenizer.from_pretrained('facebook/bart-large')
+
+        #modified here
+        if args.model in ['gen','constrained-gen']:
+            self.tokenizer = BartTokenizer.from_pretrained('facebook/bart-large')
+        else:
+            #todo
+            pass
         self.tokenizer.add_tokens([' <arg>',' <tgr>'])
     
     def get_event_type(self,ex):
@@ -72,9 +78,8 @@ class RAMSDataModule(pl.LightningDataModule):
         tokenized_template = [] 
         for w in space_tokenized_template:
             tokenized_template.extend(self.tokenizer.tokenize(w, add_prefix_space=True))
-        
-        return tokenized_input_template, tokenized_template, context
 
+        return tokenized_input_template, tokenized_template, context
     
 
     def load_ontology(self):
@@ -111,9 +116,10 @@ class RAMSDataModule(pl.LightningDataModule):
                 with open(f,'r') as reader,  open('preprocessed_data/{}.jsonl'.format(split), 'w') as writer:
                     for lidx, line in enumerate(reader):
                         ex = json.loads(line.strip())
-                        input_template, output_template, context= self.create_gold_gen(ex, ontology_dict, self.hparams.mark_trigger)
+
+                        input_template, output_template, context = self.create_gold_gen(ex, ontology_dict, self.hparams.mark_trigger)
                         
-                        
+                        #maybe change order
                         input_tokens = self.tokenizer.encode_plus(input_template, context, 
                                 add_special_tokens=True,
                                 add_prefix_space=True,
