@@ -6,7 +6,7 @@ from collections import defaultdict
 import argparse 
 
 import transformers 
-from transformers import BartTokenizer, BertTokenizerFast
+from transformers import BartTokenizer, BertTokenizer
 import torch 
 from torch.utils.data import DataLoader 
 import pytorch_lightning as pl 
@@ -26,8 +26,7 @@ class RAMSDataModule(pl.LightningDataModule):
         if args.model in ['gen','constrained-gen']:
             self.tokenizer = BartTokenizer.from_pretrained('facebook/bart-large')
         else:
-            #todo
-            pass
+            self.tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
         self.tokenizer.add_tokens([' <arg>',' <tgr>'])
     
     def get_event_type(self,ex):
@@ -53,22 +52,18 @@ class RAMSDataModule(pl.LightningDataModule):
 
         space_tokenized_input_template = input_template.split(' ')
         tokenized_input_template = [] 
+        
         for w in space_tokenized_input_template:
             tokenized_input_template.extend(self.tokenizer.tokenize(w, add_prefix_space=True))
         
         #modified here
-        if self.hparams.model in ['gen','constrained-gen']:
-            for triple in ex['gold_evt_links']:
-                trigger_span, argument_span, arg_name = triple 
-                arg_num = ontology_dict[evt_type.replace('n/a','unspecified')][arg_name]
-                arg_text = ' '.join(context_words[argument_span[0]:argument_span[1]+1])
+        for triple in ex['gold_evt_links']:
+            trigger_span, argument_span, arg_name = triple 
+            arg_num = ontology_dict[evt_type.replace('n/a','unspecified')][arg_name]
+            arg_text = ' '.join(context_words[argument_span[0]:argument_span[1]+1])
 
-                template = re.sub('<{}>'.format(arg_num),arg_text , template)
-        elif self.hparams.model in ['oracle']:
-            pass
-        else:
-            pad = self.hparams.pad
-            pass
+            template = re.sub('<{}>'.format(arg_num),arg_text , template)
+ 
 
         trigger = ex['evt_triggers'][0]
         if mark_trigger:
@@ -91,6 +86,54 @@ class RAMSDataModule(pl.LightningDataModule):
 
         return tokenized_input_template, tokenized_template, context
     
+    def create_gold_enc(self, ex, ontology_dict,mark_trigger=True):
+        '''assumes that each line only contains 1 event.
+        Input: <s> Template with special <arg> placeholders </s> </s> Passage </s>
+        Output: <s> Template with arguments and <arg> when no argument is found. 
+        '''
+
+        evt_type = self.get_event_type(ex)[0]
+        context_words = [w for sent in ex['sentences'] for w in sent ]
+        template = ontology_dict[evt_type.replace('n/a','unspecified')]['template']
+
+        #change this too
+        input_template = re.sub(r'<arg\d>', '<arg>', template) 
+
+        space_tokenized_input_template = input_template.split(' ')
+        tokenized_input_template = [] 
+        
+        for w in space_tokenized_input_template:
+            tokenized_input_template.extend(self.tokenizer.tokenize(w))
+        
+        #modified here
+        for triple in ex['gold_evt_links']:
+            trigger_span, argument_span, arg_name = triple 
+            arg_num = ontology_dict[evt_type.replace('n/a','unspecified')][arg_name]
+            arg_text = ' '.join(context_words[argument_span[0]:argument_span[1]+1])
+
+            template = re.sub('<{}>'.format(arg_num),arg_text , template)
+ 
+
+        trigger = ex['evt_triggers'][0]
+        if mark_trigger:
+            trigger_span_start = trigger[0]
+            trigger_span_end = trigger[1] +2 # one for inclusion, one for extra start marker 
+            prefix = self.tokenizer.tokenize(' '.join(context_words[:trigger[0]])) 
+            tgt = self.tokenizer.tokenize(' '.join(context_words[trigger[0]: trigger[1]+1]))
+            
+            suffix = self.tokenizer.tokenize(' '.join(context_words[trigger[1]+1:]))
+            context = prefix + [' <tgr>', ] + tgt + [' <tgr>', ] + suffix 
+        else:
+            context = self.tokenizer.tokenize(' '.join(context_words))
+
+        # also need to change this for pad
+        output_template = re.sub(r'<arg\d>','<arg>', template ) 
+        space_tokenized_template = output_template.split(' ')
+        tokenized_template = [] 
+        for w in space_tokenized_template:
+            tokenized_template.extend(self.tokenizer.tokenize(w))
+
+        return tokenized_input_template, tokenized_template, context
 
     def load_ontology(self):
         # read ontology 
@@ -120,42 +163,45 @@ class RAMSDataModule(pl.LightningDataModule):
         if not os.path.exists('preprocessed_data'):
             os.makedirs('preprocessed_data')
 
-            ontology_dict = self.load_ontology() 
+        ontology_dict = self.load_ontology() 
 
-            print('Ontology loaded')
-            
-            for split,f in [('train',self.hparams.train_file), ('val',self.hparams.val_file), ('test',self.hparams.test_file)]:
-                print(split,f)
-                with open(f,'r') as reader,  open('preprocessed_data/{}.jsonl'.format(f'RAMS_model_' + split), 'w') as writer:
-                    print('Entered')
-                    for lidx, line in enumerate(reader):
-                        ex = json.loads(line.strip())
+        print('Ontology loaded')
+        
+        for split,f in [('train',self.hparams.train_file), ('val',self.hparams.val_file), ('test',self.hparams.test_file)]:
+            print(split,f)
+            with open(f,'r') as reader,  open('preprocessed_data/{}.jsonl'.format(split + f'_RAMS_model'), 'w') as writer:
+                print('Entered')
+                for lidx, line in enumerate(reader):
+                    ex = json.loads(line.strip())
 
+                    if self.hparams.model in ['gen', 'constrained-gen']:
                         input_template, output_template, context = self.create_gold_gen(ex, ontology_dict, self.hparams.mark_trigger)
-                        
-                        #maybe change order
-                        input_tokens = self.tokenizer.encode_plus(input_template, context, 
-                                add_special_tokens=True,
-                                add_prefix_space=True,
-                                max_length=MAX_LENGTH,
-                                truncation='only_second',
-                                padding='max_length')
-                        tgt_tokens = self.tokenizer.encode_plus(output_template, 
-                        add_special_tokens=True,
-                        add_prefix_space=True, 
-                        max_length=MAX_TGT_LENGTH,
-                        truncation=True,
-                        padding='max_length')
+                    else:
+                        input_template, output_template, context = self.create_gold_enc(ex, ontology_dict, self.hparams.mark_trigger)
+                    
+                    #maybe change order
+                    input_tokens = self.tokenizer.encode_plus(input_template, context, 
+                            add_special_tokens=True,
+                            add_prefix_space=True,
+                            max_length=MAX_LENGTH,
+                            truncation='only_second',
+                            padding='max_length')
+                    tgt_tokens = self.tokenizer.encode_plus(output_template, 
+                    add_special_tokens=True,
+                    add_prefix_space=True, 
+                    max_length=MAX_TGT_LENGTH,
+                    truncation=True,
+                    padding='max_length')
 
-                        processed_ex = {
-                            # 'idx': lidx, 
-                            'doc_key': ex['doc_key'],
-                            'input_token_ids':input_tokens['input_ids'],
-                            'input_attn_mask': input_tokens['attention_mask'],
-                            'tgt_token_ids': tgt_tokens['input_ids'],
-                            'tgt_attn_mask': tgt_tokens['attention_mask'],
-                        }
-                        writer.write(json.dumps(processed_ex) + '\n')
+                    processed_ex = {
+                        # 'idx': lidx, 
+                        'doc_key': ex['doc_key'],
+                        'input_token_ids':input_tokens['input_ids'],
+                        'input_attn_mask': input_tokens['attention_mask'],
+                        'tgt_token_ids': tgt_tokens['input_ids'],
+                        'tgt_attn_mask': tgt_tokens['attention_mask'],
+                    }
+                    writer.write(json.dumps(processed_ex) + '\n')
             
 
 
@@ -203,12 +249,15 @@ if __name__ == '__main__':
         required=True,
         choices=['gen','constrained-gen','padded','oracle']
     )
+    parser.add_argument("--pad", type=int, default=1, help = "arg span for padded encoder version, default is 1 for single version")
     args = parser.parse_args() 
 
     print('ARGS PARSED')
 
     dm = RAMSDataModule(args=args)
     dm.prepare_data() 
+
+    print('DONE')
 
     # training dataloader 
     # dataloader = dm.train_dataloader() 
