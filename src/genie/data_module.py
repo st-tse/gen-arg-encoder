@@ -11,7 +11,7 @@ import torch
 from torch.utils.data import DataLoader 
 import pytorch_lightning as pl 
 
-from .data import IEDataset, my_collate
+from data import IEDataset, my_collate #temp remove .
 
 MAX_LENGTH=424 
 MAX_TGT_LENGTH=72
@@ -46,20 +46,29 @@ class RAMSDataModule(pl.LightningDataModule):
         evt_type = self.get_event_type(ex)[0]
         context_words = [w for sent in ex['sentences'] for w in sent ]
         template = ontology_dict[evt_type.replace('n/a','unspecified')]['template']
+
+        #change this too
         input_template = re.sub(r'<arg\d>', '<arg>', template) 
+
+
         space_tokenized_input_template = input_template.split(' ')
         tokenized_input_template = [] 
         for w in space_tokenized_input_template:
             tokenized_input_template.extend(self.tokenizer.tokenize(w, add_prefix_space=True))
         
+        #modified here
+        if self.hparams.model in ['gen','constrained-gen']:
+            for triple in ex['gold_evt_links']:
+                trigger_span, argument_span, arg_name = triple 
+                arg_num = ontology_dict[evt_type.replace('n/a','unspecified')][arg_name]
+                arg_text = ' '.join(context_words[argument_span[0]:argument_span[1]+1])
 
-        for triple in ex['gold_evt_links']:
-            trigger_span, argument_span, arg_name = triple 
-            arg_num = ontology_dict[evt_type.replace('n/a','unspecified')][arg_name]
-            arg_text = ' '.join(context_words[argument_span[0]:argument_span[1]+1])
-
-            template = re.sub('<{}>'.format(arg_num),arg_text , template)
-            
+                template = re.sub('<{}>'.format(arg_num),arg_text , template)
+        elif self.hparams.model in ['oracle']:
+            pass
+        else:
+            pad = self.hparams.pad
+            pass
 
         trigger = ex['evt_triggers'][0]
         if mark_trigger:
@@ -73,6 +82,7 @@ class RAMSDataModule(pl.LightningDataModule):
         else:
             context = self.tokenizer.tokenize(' '.join(context_words), add_prefix_space=True)
 
+        # also need to change this for pad
         output_template = re.sub(r'<arg\d>','<arg>', template ) 
         space_tokenized_template = output_template.split(' ')
         tokenized_template = [] 
@@ -111,9 +121,13 @@ class RAMSDataModule(pl.LightningDataModule):
             os.makedirs('preprocessed_data')
 
             ontology_dict = self.load_ontology() 
+
+            print('Ontology loaded')
             
             for split,f in [('train',self.hparams.train_file), ('val',self.hparams.val_file), ('test',self.hparams.test_file)]:
-                with open(f,'r') as reader,  open('preprocessed_data/{}.jsonl'.format(split), 'w') as writer:
+                print(split,f)
+                with open(f,'r') as reader,  open('preprocessed_data/{}.jsonl'.format(f'RAMS_model_' + split), 'w') as writer:
+                    print('Entered')
                     for lidx, line in enumerate(reader):
                         ex = json.loads(line.strip())
 
@@ -183,16 +197,26 @@ if __name__ == '__main__':
     parser.add_argument('--train_batch_size', type=int, default=2)
     parser.add_argument('--eval_batch_size', type=int, default=4)
     parser.add_argument('--mark-trigger', action='store_true', default=True)
+    parser.add_argument(
+        "--model", 
+        type=str, 
+        required=True,
+        choices=['gen','constrained-gen','padded','oracle']
+    )
     args = parser.parse_args() 
+
+    print('ARGS PARSED')
 
     dm = RAMSDataModule(args=args)
     dm.prepare_data() 
 
     # training dataloader 
-    dataloader = dm.train_dataloader() 
+    # dataloader = dm.train_dataloader() 
 
-    for idx, batch in enumerate(dataloader):
-        print(batch)
-        break 
+
+    # print('DATALOADER:')
+    # for idx, batch in enumerate(dataloader):
+    #     print(batch)
+    #     break 
 
     # val dataloader 
