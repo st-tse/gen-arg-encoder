@@ -169,6 +169,8 @@ class RAMSDataModule(pl.LightningDataModule):
         evt_type = self.get_event_type(ex)[0]
         context_words = [w for sent in ex['sentences'] for w in sent ]
         template = ontology_dict[evt_type.replace('n/a','unspecified')]['template']
+        if template[0] == '"':
+            template = template[1:]
 
         pad = self.hparams.pad
         arg_pad = pad * '<arg> '
@@ -180,16 +182,22 @@ class RAMSDataModule(pl.LightningDataModule):
 
         for w in space_tokenized_input_template:
             tokenized_input_template.extend(self.tokenizer.tokenize(w))
-
-        base_template = re.sub(r'<arg\d>', '<arg>', template) 
-
-        base_template = base_template.split(' ')
         
+        arg_count = space_tokenized_input_template.count('<arg>') // pad
+
+        arg_list = [[] for _ in range(arg_count)]
+
         for triple in ex['gold_evt_links']:
             trigger_span, argument_span, arg_name = triple 
+            # print(triple)
             arg_num = ontology_dict[evt_type.replace('n/a','unspecified')][arg_name]
-            arg_text = ' '.join(context_words[argument_span[0]:argument_span[1]+1])
-            template = re.sub('<{}>'.format(arg_num), arg_text , template)
+            arg_num = int(arg_num[3:])
+    
+            arg_text = context_words[argument_span[0]:argument_span[1]+1] 
+
+            if arg_num <= arg_count:
+                for w in arg_text:
+                    arg_list[arg_num - 1].extend(self.tokenizer.tokenize(w))
 
         trigger = ex['evt_triggers'][0]
         if mark_trigger:
@@ -203,60 +211,28 @@ class RAMSDataModule(pl.LightningDataModule):
         else:
             context = self.tokenizer.tokenize(' '.join(context_words))
 
-        # also need to change this for pad
-        #removes numbering
-        output_template = re.sub(r'<arg\d>','<arg>', template ) 
+        tokenized_template = [] 
 
+        output_template = re.sub(r'<arg\d>', '<arg>', template) 
         space_tokenized_template = output_template.split(' ')
 
-        tokenized_template = [] 
-       
-        #skip first if starts with arg, otherwise no pad
-        if base_template[0] == '<arg>':
-            base_template = base_template[1:]
-            
-        count = 0
-    
+        arg_ind = 0
         for w in space_tokenized_template:
-            try:
-                match = (w == base_template[0])
-            except:
-                match = False
-
-            if match:
-
-                while count < pad:
-                    tokenized_template.extend(self.tokenizer.tokenize('<arg>'))
-                    count +=1
-
-                t = self.tokenizer.tokenize(w)
-                tokenized_template.extend(t)
-
-                # next word
-                base_template = base_template[1:]
-                #check if its is supposed to be an arg
-                try: 
-                    if base_template[0] == '<arg>':
-                        base_template = base_template[1:]
-                        count = 0
-                    else:
-                        count = pad
-                except:
-                    count = 0
+            if w != '<arg>':
+                tokenized_template.extend(self.tokenizer.tokenize(w))
+                count = 0
             else:
-                t = self.tokenizer.tokenize(w)
-    
-                while (count < pad) and (t != []):
-                    tokenized_template.extend([t.pop(0)])
-                    count += 1
+                arg_tokens = arg_list[arg_ind]
+                for _ in range(pad):
+                    if arg_tokens != []:
+                        tokenized_template.append(arg_tokens.pop(0))
+                    else:
+                        tokenized_template.extend(self.tokenizer.tokenize('<arg>'))
 
-        # if len(tokenized_input_template) != len(tokenized_template):
+                arg_ind += 1
+
         # print(tokenized_input_template)
         # print(tokenized_template)
-        # print(template)
-        # print(output_template)
-        # print('')
-
         return tokenized_input_template, tokenized_template, context
 
     def load_ontology(self):
@@ -348,6 +324,7 @@ class RAMSDataModule(pl.LightningDataModule):
                             'tgt_attn_mask': tgt_tokens['attention_mask'],
                         }
                         writer.write(json.dumps(processed_ex) + '\n')
+                    
 
         print('Dropped:', ind)
 
