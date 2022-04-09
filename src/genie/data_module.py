@@ -1,3 +1,4 @@
+from copy import deepcopy
 import os 
 import json 
 import re 
@@ -10,6 +11,8 @@ from transformers import BartTokenizer, BertTokenizer
 import torch 
 from torch.utils.data import DataLoader 
 import pytorch_lightning as pl 
+import sys
+import copy
 
 from data import IEDataset, my_collate #temp remove .
 
@@ -25,9 +28,11 @@ class RAMSDataModule(pl.LightningDataModule):
         #modified here
         if args.model in ['gen','constrained-gen']:
             self.tokenizer = BartTokenizer.from_pretrained('facebook/bart-large')
+            self.tokenizer.add_tokens([' <arg>',' <tgr>'])
         else:
             self.tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
-        self.tokenizer.add_tokens([' <arg>',' <tgr>'])
+            self.tokenizer.add_tokens(['<arg>','<tgr>','<pad>'])
+        
     
     def get_event_type(self,ex):
         evt_type = []
@@ -78,15 +83,18 @@ class RAMSDataModule(pl.LightningDataModule):
             context = self.tokenizer.tokenize(' '.join(context_words), add_prefix_space=True)
 
         # also need to change this for pad
+
+        #removes numbers
         output_template = re.sub(r'<arg\d>','<arg>', template ) 
         space_tokenized_template = output_template.split(' ')
+
         tokenized_template = [] 
         for w in space_tokenized_template:
             tokenized_template.extend(self.tokenizer.tokenize(w, add_prefix_space=True))
 
         return tokenized_input_template, tokenized_template, context
     
-    def create_gold_enc(self, ex, ontology_dict,mark_trigger=True):
+    def create_gold_oracle(self, ex, ontology_dict,mark_trigger=True):
         '''assumes that each line only contains 1 event.
         Input: <s> Template with special <arg> placeholders </s> </s> Passage </s>
         Output: <s> Template with arguments and <arg> when no argument is found. 
@@ -96,23 +104,20 @@ class RAMSDataModule(pl.LightningDataModule):
         context_words = [w for sent in ex['sentences'] for w in sent ]
         template = ontology_dict[evt_type.replace('n/a','unspecified')]['template']
 
-        #change this too
-        input_template = re.sub(r'<arg\d>', '<arg>', template) 
+        input_template = re.sub(r'<arg\d>', '', template) 
+        input_template = input_template.split(' ')
+        input_template  = list(filter(lambda val: val != '', input_template))
 
-        space_tokenized_input_template = input_template.split(' ')
-        tokenized_input_template = [] 
-        
-        for w in space_tokenized_input_template:
-            tokenized_input_template.extend(self.tokenizer.tokenize(w))
-        
-        #modified here
         for triple in ex['gold_evt_links']:
             trigger_span, argument_span, arg_name = triple 
+            #arg_len = argument_span[1] - argument_span[0] + 1
             arg_num = ontology_dict[evt_type.replace('n/a','unspecified')][arg_name]
             arg_text = ' '.join(context_words[argument_span[0]:argument_span[1]+1])
+            #template_fill = arg_len * '<arg> '
+            #template_fill = template_fill[:-1]
 
-            template = re.sub('<{}>'.format(arg_num),arg_text , template)
- 
+            template = re.sub('<{}>'.format(arg_num), arg_text , template)
+            #input_template = re.sub('<{}>'.format(arg_num), template_fill , input_template)
 
         trigger = ex['evt_triggers'][0]
         if mark_trigger:
@@ -127,11 +132,130 @@ class RAMSDataModule(pl.LightningDataModule):
             context = self.tokenizer.tokenize(' '.join(context_words))
 
         # also need to change this for pad
+        #removes numbering
         output_template = re.sub(r'<arg\d>','<arg>', template ) 
+        
+
         space_tokenized_template = output_template.split(' ')
+
         tokenized_template = [] 
+        tokenized_input_template = []
+
+       
         for w in space_tokenized_template:
-            tokenized_template.extend(self.tokenizer.tokenize(w))
+            t = self.tokenizer.tokenize(w)
+            tokenized_template.extend(t)
+
+            try:
+                match = (w == input_template[0])
+            except:
+                match = False
+
+            if match:
+                tokenized_input_template.extend(t)
+                input_template = input_template[1:]
+            else:
+                for _ in range(len(t)):
+                    tokenized_input_template.extend(self.tokenizer.tokenize('<arg>'))
+  
+        return tokenized_input_template, tokenized_template, context
+
+    def create_gold_pad(self, ex, ontology_dict,mark_trigger=True):
+        '''assumes that each line only contains 1 event.
+        Input: <s> Template with special <arg> placeholders </s> </s> Passage </s>
+        Output: <s> Template with arguments and <arg> when no argument is found. 
+        '''
+
+        evt_type = self.get_event_type(ex)[0]
+        context_words = [w for sent in ex['sentences'] for w in sent ]
+        template = ontology_dict[evt_type.replace('n/a','unspecified')]['template']
+
+        pad = self.hparams.pad
+        arg_pad = pad * '<arg> '
+        arg_pad = arg_pad[:-1]
+        input_template = re.sub(r'<arg\d>', arg_pad, template) 
+
+        space_tokenized_input_template = input_template.split(' ')
+        tokenized_input_template = [] 
+
+        for w in space_tokenized_input_template:
+            tokenized_input_template.extend(self.tokenizer.tokenize(w))
+
+        base_template = re.sub(r'<arg\d>', '<arg>', template) 
+
+        base_template = base_template.split(' ')
+        
+        for triple in ex['gold_evt_links']:
+            trigger_span, argument_span, arg_name = triple 
+            arg_num = ontology_dict[evt_type.replace('n/a','unspecified')][arg_name]
+            arg_text = ' '.join(context_words[argument_span[0]:argument_span[1]+1])
+            template = re.sub('<{}>'.format(arg_num), arg_text , template)
+
+        trigger = ex['evt_triggers'][0]
+        if mark_trigger:
+            trigger_span_start = trigger[0]
+            trigger_span_end = trigger[1] +2 # one for inclusion, one for extra start marker 
+            prefix = self.tokenizer.tokenize(' '.join(context_words[:trigger[0]])) 
+            tgt = self.tokenizer.tokenize(' '.join(context_words[trigger[0]: trigger[1]+1]))
+            
+            suffix = self.tokenizer.tokenize(' '.join(context_words[trigger[1]+1:]))
+            context = prefix + [' <tgr>', ] + tgt + [' <tgr>', ] + suffix 
+        else:
+            context = self.tokenizer.tokenize(' '.join(context_words))
+
+        # also need to change this for pad
+        #removes numbering
+        output_template = re.sub(r'<arg\d>','<arg>', template ) 
+
+        space_tokenized_template = output_template.split(' ')
+
+        tokenized_template = [] 
+       
+        #skip first if starts with arg, otherwise no pad
+        if base_template[0] == '<arg>':
+            base_template = base_template[1:]
+            
+        count = 0
+    
+        for w in space_tokenized_template:
+            try:
+                match = (w == base_template[0])
+            except:
+                match = False
+
+            if match:
+
+                while count < pad:
+                    tokenized_template.extend(self.tokenizer.tokenize('<arg>'))
+                    count +=1
+
+                t = self.tokenizer.tokenize(w)
+                tokenized_template.extend(t)
+
+                # next word
+                base_template = base_template[1:]
+                #check if its is supposed to be an arg
+                try: 
+                    if base_template[0] == '<arg>':
+                        base_template = base_template[1:]
+                        count = 0
+                    else:
+                        count = pad
+                except:
+                    count = 0
+            else:
+                t = self.tokenizer.tokenize(w)
+    
+                while (count < pad) and (t != []):
+                    tokenized_template.extend([t.pop(0)])
+                    count += 1
+
+        # if len(tokenized_input_template) != len(tokenized_template):
+        # print(tokenized_input_template)
+        # print(tokenized_template)
+        # print(template)
+        # print(output_template)
+        # print('')
 
         return tokenized_input_template, tokenized_template, context
 
@@ -165,44 +289,67 @@ class RAMSDataModule(pl.LightningDataModule):
 
         ontology_dict = self.load_ontology() 
 
-        print('Ontology loaded')
+        ind = 0
         
         for split,f in [('train',self.hparams.train_file), ('val',self.hparams.val_file), ('test',self.hparams.test_file)]:
-            print(split,f)
-            with open(f,'r') as reader,  open('preprocessed_data/{}.jsonl'.format(split + f'_RAMS_model'), 'w') as writer:
-                print('Entered')
+            model_id = self.hparams.model
+            if model_id == 'padded':
+                model_id += f'_{self.hparams.pad}'
+            with open(f,'r') as reader,  open('preprocessed_data/{}.jsonl'.format(split + f'_RAMS_{model_id}'), 'w') as writer:
                 for lidx, line in enumerate(reader):
                     ex = json.loads(line.strip())
 
                     if self.hparams.model in ['gen', 'constrained-gen']:
                         input_template, output_template, context = self.create_gold_gen(ex, ontology_dict, self.hparams.mark_trigger)
+                    elif self.hparams.model == 'oracle':
+                        input_template, output_template, context = self.create_gold_oracle(ex, ontology_dict, self.hparams.mark_trigger)
                     else:
-                        input_template, output_template, context = self.create_gold_enc(ex, ontology_dict, self.hparams.mark_trigger)
-                    
-                    #maybe change order
-                    input_tokens = self.tokenizer.encode_plus(input_template, context, 
-                            add_special_tokens=True,
-                            add_prefix_space=True,
-                            max_length=MAX_LENGTH,
-                            truncation='only_second',
-                            padding='max_length')
-                    tgt_tokens = self.tokenizer.encode_plus(output_template, 
-                    add_special_tokens=True,
-                    add_prefix_space=True, 
-                    max_length=MAX_TGT_LENGTH,
-                    truncation=True,
-                    padding='max_length')
+                        input_template, output_template, context = self.create_gold_pad(ex, ontology_dict, self.hparams.mark_trigger)
 
-                    processed_ex = {
-                        # 'idx': lidx, 
-                        'doc_key': ex['doc_key'],
-                        'input_token_ids':input_tokens['input_ids'],
-                        'input_attn_mask': input_tokens['attention_mask'],
-                        'tgt_token_ids': tgt_tokens['input_ids'],
-                        'tgt_attn_mask': tgt_tokens['attention_mask'],
-                    }
-                    writer.write(json.dumps(processed_ex) + '\n')
-            
+                    if self.hparams.model in ['gen', 'constrained-gen']:
+                        input_tokens = self.tokenizer.encode_plus(input_template, context, 
+                                add_special_tokens=True,
+                                add_prefix_space=True,
+                                max_length=MAX_LENGTH,
+                                truncation='only_second',
+                                padding='max_length')
+                        tgt_tokens = self.tokenizer.encode_plus(output_template, 
+                        add_special_tokens=True,
+                        add_prefix_space=True, 
+                        max_length=MAX_TGT_LENGTH,
+                        truncation=True,
+                        padding='max_length')
+                    else:
+                        #not sure if reversal here is required
+                        input_tokens = self.tokenizer.encode_plus(context, input_template,
+                                add_special_tokens=True,
+                                add_prefix_space=True,
+                                max_length=MAX_LENGTH,
+                                truncation='only_first',
+                                padding='max_length')
+                        tgt_tokens = self.tokenizer.encode_plus(context, output_template,
+                                add_special_tokens=True,
+                                add_prefix_space=True, 
+                                max_length=MAX_LENGTH,
+                                truncation='only_first',
+                                padding='max_length')
+
+                    if (len(input_template) != len(output_template)) and (self.hparams.model in ['oracle', 'padded']):
+                        print("Input template:", input_template)
+                        print("Output template:", output_template)
+                        ind += 1
+                    else:
+                        processed_ex = {
+                            # 'idx': lidx, 
+                            'doc_key': ex['doc_key'],
+                            'input_token_ids':input_tokens['input_ids'],
+                            'input_attn_mask': input_tokens['attention_mask'],
+                            'tgt_token_ids': tgt_tokens['input_ids'],
+                            'tgt_attn_mask': tgt_tokens['attention_mask'],
+                        }
+                        writer.write(json.dumps(processed_ex) + '\n')
+
+        print('Dropped:', ind)
 
 
     
