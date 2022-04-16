@@ -11,8 +11,9 @@ import torch
 from torch.utils.data import DataLoader 
 import pytorch_lightning as pl 
 
-from .data import IEDataset, my_collate
-from .utils import load_ontology
+#removed period for realtive path
+from data import IEDataset, my_collate
+from utils import load_ontology
 
 MAX_LENGTH=170
 MAX_TGT_LENGTH=72
