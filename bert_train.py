@@ -19,3 +19,4 @@ dataloader = DataLoader(dataset,
     batch_size=16, 
     shuffle=True)
 
+optimizer = AdamW()
