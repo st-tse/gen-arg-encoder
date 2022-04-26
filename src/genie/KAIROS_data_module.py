@@ -11,7 +11,7 @@ import torch
 from torch.utils.data import DataLoader 
 import pytorch_lightning as pl 
 
-from .data import IEDataset, my_collate
+from data import IEDataset, my_collate #remove .
 from .utils import load_ontology, check_pronoun, clean_mention
 
 MAX_CONTEXT_LENGTH=400 # measured in words 
