@@ -161,6 +161,12 @@ class KAIROSDataModule(pl.LightningDataModule):
             tokenized_template.extend(self.tokenizer.tokenize(w, add_prefix_space=True))
         
         return tokenized_input_template, tokenized_template, context
+
+    def create_gold_orcale(self, ex, ontology_dict,mark_trigger=True, index=0, ent2info=None, use_info=False):
+        pass
+
+    def create_gold_pad(self, ex, ontology_dict,mark_trigger=True, index=0, ent2info=None, use_info=False):
+        pass
             
     def prepare_data(self):
         data_dir = 'preprocessed_{}'.format(self.hparams.dataset)
@@ -200,16 +206,16 @@ class KAIROSDataModule(pl.LightningDataModule):
                             input_template, output_template, context= self.create_gold_gen(ex, ontology_dict, self.hparams.mark_trigger, 
                                 index=i, ent2info=ent2info, use_info=self.hparams.use_info)
                         elif self.hparams.model == 'oracle':
-                            input_template, output_template, context= self.create_gold_gen(ex, ontology_dict, self.hparams.mark_trigger, 
+                            input_template, output_template, context= self.create_gold_orcale(ex, ontology_dict, self.hparams.mark_trigger, 
                                 index=i, ent2info=ent2info, use_info=self.hparams.use_info)
                         else: #padded
-                            input_template, output_template, context= self.create_gold_gen(ex, ontology_dict, self.hparams.mark_trigger, 
+                            input_template, output_template, context= self.create_gold_pad(ex, ontology_dict, self.hparams.mark_trigger, 
                                 index=i, ent2info=ent2info, use_info=self.hparams.use_info)
                         
-                        max_tokens = max(len(context) + len(input_template) +2, max_tokens)
-                            # print(len(context) + len(input_template) +2 ) 
-                        max_tgt = max(len(output_template) +1 , max_tgt)
-                        assert(len(output_template) < MAX_TGT_LENGTH)
+                        # max_tokens = max(len(context) + len(input_template) +2, max_tokens)
+                        #     # print(len(context) + len(input_template) +2 ) 
+                        # max_tgt = max(len(output_template) +1 , max_tgt)
+                        # # assert(len(output_template) < MAX_TGT_LENGTH)
 
                         if self.hparams.model in ['gen', 'constrained-gen']:
                             input_tokens = self.tokenizer.encode_plus(input_template, context, 
@@ -225,17 +231,17 @@ class KAIROSDataModule(pl.LightningDataModule):
                             truncation=True,
                             padding='max_length')
                         else:
-                            input_tokens = self.tokenizer.encode_plus(input_template, context, 
+                            input_tokens = self.tokenizer.encode_plus(context, input_template,
                                     add_special_tokens=True,
                                     add_prefix_space=True,
                                     max_length=MAX_LENGTH,
-                                    truncation='only_second',
+                                    truncation='only_first',
                                     padding='max_length')
-                            tgt_tokens = self.tokenizer.encode_plus(output_template, 
+                            tgt_tokens = self.tokenizer.encode_plus(context, output_template, 
                             add_special_tokens=True,
                             add_prefix_space=True, 
-                            max_length=MAX_TGT_LENGTH,
-                            truncation=True,
+                            max_length=MAX_LENGTH,
+                            truncation='only_first',
                             padding='max_length')
 
 
