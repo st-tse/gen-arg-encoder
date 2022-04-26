@@ -168,7 +168,7 @@ class KAIROSDataModule(pl.LightningDataModule):
         
         return tokenized_input_template, tokenized_template, context
 
-    def create_gold_orcale(self, ex, ontology_dict,mark_trigger=True, index=0, ent2info=None, use_info=False):
+    def create_gold_oracle(self, ex, ontology_dict,mark_trigger=True, index=0, ent2info=None, use_info=False):
         '''
         If there are multiple events per example, use index parameter.
 
@@ -181,9 +181,10 @@ class KAIROSDataModule(pl.LightningDataModule):
         evt_type = ex['event_mentions'][index]['event_type']
 
         template = ontology_dict[evt_type]['template']
-        # input_template = re.sub(r'<arg\d>', '<arg>', template) 
-
-        # space_tokenized_input_template = input_template.split()
+        input_template = re.sub(r'<arg\d>', '', template) 
+    
+        input_template = input_template.split()
+        input_template  = list(filter(lambda val: val != '', input_template))
         # tokenized_input_template = [] 
         # for w in space_tokenized_input_template:
         #     tokenized_input_template.extend(self.tokenizer.tokenize(w, add_prefix_space=True))
@@ -291,11 +292,16 @@ class KAIROSDataModule(pl.LightningDataModule):
 
         output_template = re.sub(r'<arg\d>','<arg>', template ) 
         space_tokenized_template = output_template.split()
-        tokenized_template = [] 
-        for w in space_tokenized_template:
-            tokenized_template.extend(self.tokenizer.tokenize(w, add_prefix_space=True))
+        # tokenized_template = [] 
+        # for w in space_tokenized_template:
+        #     tokenized_template.extend(self.tokenizer.tokenize(w, add_prefix_space=True))
 
         tokenized_input_template = []
+        tokenized_template = []
+
+        # print(input_template)
+        # print(space_tokenized_template)
+
         for w in space_tokenized_template:
             t = self.tokenizer.tokenize(w)
             tokenized_template.extend(t)
