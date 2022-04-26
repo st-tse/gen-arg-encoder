@@ -177,12 +177,13 @@ class KAIROSDataModule(pl.LightningDataModule):
         max_tgt =0 
 
         for split,f in [('train',self.hparams.train_file), ('val',self.hparams.val_file), ('test',self.hparams.test_file)]:
+            ind = 0 
             model_id = self.hparams.model
             if model_id == 'padded':
                 model_id += f'_{self.hparams.pad}'
             coref_split = 'dev' if split=='val' else split 
             coref_reader = open(os.path.join(self.hparams.coref_dir, '{}.jsonlines'.format(coref_split)))
-            with open(f,'r') as reader,  open('preprocessed_data/{}.jsonl'.format(split + f'_KAIROS_{model_id}'), 'w') as writer:
+            with open(f,'r') as reader, open(os.path.join(data_dir,'{}.jsonl'.format(split + f'_KAIROS_{model_id}')), 'w') as writer:
                 for line, coref_line in zip(reader, coref_reader):
                     ex = json.loads(line.strip())
                     corefs = json.loads(coref_line.strip())
@@ -206,7 +207,7 @@ class KAIROSDataModule(pl.LightningDataModule):
                             input_template, output_template, context= self.create_gold_gen(ex, ontology_dict, self.hparams.mark_trigger, 
                                 index=i, ent2info=ent2info, use_info=self.hparams.use_info)
                         elif self.hparams.model == 'oracle':
-                            input_template, output_template, context= self.create_gold_orcale(ex, ontology_dict, self.hparams.mark_trigger, 
+                            input_template, output_template, context= self.create_gold_gen(ex, ontology_dict, self.hparams.mark_trigger, 
                                 index=i, ent2info=ent2info, use_info=self.hparams.use_info)
                         else: #padded
                             input_template, output_template, context= self.create_gold_pad(ex, ontology_dict, self.hparams.mark_trigger, 
@@ -217,50 +218,50 @@ class KAIROSDataModule(pl.LightningDataModule):
                         # max_tgt = max(len(output_template) +1 , max_tgt)
                         # # assert(len(output_template) < MAX_TGT_LENGTH)
 
-                        if self.hparams.model in ['gen', 'constrained-gen']:
-                            input_tokens = self.tokenizer.encode_plus(input_template, context, 
-                                    add_special_tokens=True,
-                                    add_prefix_space=True,
-                                    max_length=MAX_LENGTH,
-                                    truncation='only_second',
-                                    padding='max_length')
-                            tgt_tokens = self.tokenizer.encode_plus(output_template, 
-                            add_special_tokens=True,
-                            add_prefix_space=True, 
-                            max_length=MAX_TGT_LENGTH,
-                            truncation=True,
-                            padding='max_length')
-                        else:
-                            input_tokens = self.tokenizer.encode_plus(context, input_template,
-                                    add_special_tokens=True,
-                                    add_prefix_space=True,
-                                    max_length=MAX_LENGTH,
-                                    truncation='only_first',
-                                    padding='max_length')
-                            tgt_tokens = self.tokenizer.encode_plus(context, output_template, 
-                            add_special_tokens=True,
-                            add_prefix_space=True, 
-                            max_length=MAX_LENGTH,
-                            truncation='only_first',
-                            padding='max_length')
+                        # if self.hparams.model in ['gen', 'constrained-gen']:
+                        input_tokens = self.tokenizer.encode_plus(input_template, context, 
+                                add_special_tokens=True,
+                                add_prefix_space=True,
+                                max_length=MAX_LENGTH,
+                                truncation='only_second',
+                                padding='max_length')
+                        tgt_tokens = self.tokenizer.encode_plus(output_template, 
+                        add_special_tokens=True,
+                        add_prefix_space=True, 
+                        max_length=MAX_TGT_LENGTH,
+                        truncation=True,
+                        padding='max_length')
+                        # else:
+                        #     input_tokens = self.tokenizer.encode_plus(context, input_template,
+                        #             add_special_tokens=True,
+                        #             add_prefix_space=True,
+                        #             max_length=MAX_LENGTH,
+                        #             truncation='only_first',
+                        #             padding='max_length')
+                        #     tgt_tokens = self.tokenizer.encode_plus(context, output_template, 
+                        #     add_special_tokens=True,
+                        #     add_prefix_space=True, 
+                        #     max_length=MAX_LENGTH,
+                        #     truncation='only_first',
+                        #     padding='max_length')
 
 
-                        if (len(input_template) != len(output_template)) and (self.hparams.model in ['oracle', 'padded']):
-                            print("Input template:", input_template)
-                            print("Output template:", output_template)
-                            ind += 1
-                        else:
-                            processed_ex = {
-                                'event_idx': i, 
-                                'doc_key': ex['doc_id'], 
-                                'input_token_ids':input_tokens['input_ids'],
-                                'input_attn_mask': input_tokens['attention_mask'],
-                                'tgt_token_ids': tgt_tokens['input_ids'],
-                                'tgt_attn_mask': tgt_tokens['attention_mask'],
-                            }
-                            writer.write(json.dumps(processed_ex) + '\n')
+                        # if (len(input_template) != len(output_template)) and (self.hparams.model in ['oracle', 'padded']):
+                        #     print("Input template:", input_template)
+                        #     print("Output template:", output_template)
+                        #     ind += 1
+                        # else:
+                        processed_ex = {
+                            'event_idx': i, 
+                            'doc_key': ex['doc_id'], 
+                            'input_token_ids':input_tokens['input_ids'],
+                            'input_attn_mask': input_tokens['attention_mask'],
+                            'tgt_token_ids': tgt_tokens['input_ids'],
+                            'tgt_attn_mask': tgt_tokens['attention_mask'],
+                        }
+                        writer.write(json.dumps(processed_ex) + '\n')
 
-        print('Dropped:', ind)
+            print('Dropped:', ind)
         print('longest context:{}'.format(max_tokens))
         print('longest target {}'.format(max_tgt))
     
