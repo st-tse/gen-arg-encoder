@@ -321,7 +321,162 @@ class KAIROSDataModule(pl.LightningDataModule):
         return tokenized_input_template, tokenized_template, context
 
     def create_gold_pad(self, ex, ontology_dict,mark_trigger=True, index=0, ent2info=None, use_info=False):
-        pass
+        '''
+        If there are multiple events per example, use index parameter.
+
+        Input: <s> Template with special <arg> placeholders </s> </s> Passage </s>
+        Output: <s> Template with arguments and <arg> when no argument is found. 
+        '''
+        if use_info and ent2info==None:
+            raise ValueError('entity to informative mention mapping required.')
+
+        evt_type = ex['event_mentions'][index]['event_type']
+
+        
+        template = ontology_dict[evt_type]['template']
+
+        pad = self.hparams.pad
+        arg_pad = pad * '<arg> '
+        arg_pad = arg_pad[:-1]
+        input_template = re.sub(r'<arg\d>', arg_pad, template) 
+
+        space_tokenized_input_template = input_template.split(' ')
+        tokenized_input_template = [] 
+
+        for w in space_tokenized_input_template:
+            tokenized_input_template.extend(self.tokenizer.tokenize(w))
+
+        arg_count = space_tokenized_input_template.count('<arg>') // pad
+
+        arg_list = [[] for _ in range(arg_count)]
+
+        role2arg = defaultdict(list)
+
+        for argument in ex['event_mentions'][index]['arguments']:
+            role2arg[argument['role']].append(argument)
+
+        role2arg = dict(role2arg)
+
+        # create output template 
+        arg_idx2text = defaultdict(list)
+        for role in role2arg.keys():
+            if role not in ontology_dict[evt_type]:
+                # annotation error 
+                continue 
+            for i, argument in enumerate(role2arg[role]):
+                use_arg = True 
+                if use_info:
+                    ent_id = argument['entity_id']
+                    if ent_id in ent2info:
+                        arg_text = clean_mention(ent2info[ent_id])
+                        if check_pronoun(arg_text):
+                            # skipping this argument 
+                            use_arg = False 
+                        # if arg_text != argument['text']:
+                            # print('Original mention:{}, Informative mention:{}'.format(argument['text'], arg_text))
+                    else:
+                        arg_text = argument['text']
+                else:
+                    arg_text = argument['text']
+                
+                # assign the argument index 
+                if i < len(ontology_dict[evt_type][role]):
+                    # enough slots to fill in 
+                    arg_idx = ontology_dict[evt_type][role][i]
+                    
+                else:
+                    # multiple participants for the same role 
+                    arg_idx = ontology_dict[evt_type][role][-1]
+
+                if use_arg:
+                    arg_idx2text[arg_idx].append(arg_text)
+                
+        for arg_idx, text_list in arg_idx2text.items():
+            text = ' and '.join(text_list)
+            template = re.sub('<{}>'.format(arg_idx), text, template)
+            for w in text_list:
+                arg_list[int(arg_idx[3:])-1].extend(self.tokenizer.tokenize(w))
+
+        print(arg_list)
+
+        trigger = ex['event_mentions'][index]['trigger']
+        offset = 0 
+        # trigger span does not include last index 
+        context_words = ex['tokens']
+        center_sent = trigger['sent_idx']
+        if len(context_words) > MAX_CONTEXT_LENGTH:
+            cur_len = len(ex['sentences'][center_sent][0])
+            context_words = [tup[0] for tup in ex['sentences'][center_sent][0]]
+            if cur_len > MAX_CONTEXT_LENGTH:
+                # one sentence is very long
+                trigger_start = trigger['start']
+                start_idx = max(0, trigger_start- MAX_CONTEXT_LENGTH//2 )
+                end_idx = min(len(context_words), trigger_start + MAX_CONTEXT_LENGTH //2  )
+                context_words = context_words[start_idx: end_idx]
+                offset = start_idx 
+
+            else:
+                # take a sliding window 
+                left = center_sent -1 
+                right = center_sent +1 
+                
+                total_sents = len(ex['sentences'])
+                prev_len =0 
+                while cur_len >  prev_len:
+                    prev_len = cur_len 
+                    # try expanding the sliding window 
+                    if left >= 0:
+                        left_sent_tokens = [tup[0] for tup in ex['sentences'][left][0]]
+                        if cur_len + len(left_sent_tokens) <= MAX_CONTEXT_LENGTH:
+                            context_words = left_sent_tokens + context_words
+                            left -=1 
+                            cur_len += len(left_sent_tokens)
+                    
+                    if right < total_sents:
+                        right_sent_tokens = [tup[0] for tup in ex['sentences'][right][0]]
+                        if cur_len + len(right_sent_tokens) <= MAX_CONTEXT_LENGTH:
+                            context_words = context_words + right_sent_tokens
+                            right +=1 
+                            cur_len += len(right_sent_tokens)
+                # update trigger offset 
+                offset = sum([len(ex['sentences'][idx][0]) for idx in range(left+1)])
+        
+            
+        assert(len(context_words) <= MAX_CONTEXT_LENGTH) 
+
+        trigger['start'] = trigger['start'] - offset 
+        trigger['end'] = trigger['end'] - offset 
+        if mark_trigger:
+            prefix = self.tokenizer.tokenize(' '.join(context_words[:trigger['start']]), add_prefix_space=True) 
+            tgt = self.tokenizer.tokenize(' '.join(context_words[trigger['start']: trigger['end']]), add_prefix_space=True)
+            
+            suffix = self.tokenizer.tokenize(' '.join(context_words[trigger['end']:]), add_prefix_space=True)
+            context = prefix + [' <tgr>', ] + tgt + [' <tgr>', ] + suffix 
+        else:
+            context = self.tokenizer.tokenize(' '.join(context_words), add_prefix_space=True)
+
+        tokenized_template = [] 
+
+        template = ontology_dict[evt_type]['template']
+        output_template = re.sub(r'<arg\d>', '<arg>', template) 
+        space_tokenized_template = output_template.split(' ')
+
+        arg_ind = 0
+        for w in space_tokenized_template:
+            if w != '<arg>':
+                tokenized_template.extend(self.tokenizer.tokenize(w))
+                count = 0
+            else:
+                arg_tokens = arg_list[arg_ind]
+                for _ in range(pad):
+                    if arg_tokens != []:
+                        tokenized_template.append(arg_tokens.pop(0))
+                    else:
+                        tokenized_template.extend(self.tokenizer.tokenize('<arg>'))
+
+                arg_ind += 1
+        
+        return tokenized_input_template, tokenized_template, context
             
     def prepare_data(self):
         data_dir = 'preprocessed_{}'.format(self.hparams.dataset)
@@ -368,14 +523,14 @@ class KAIROSDataModule(pl.LightningDataModule):
                             input_template, output_template, context= self.create_gold_pad(ex, ontology_dict, self.hparams.mark_trigger, 
                                 index=i, ent2info=ent2info, use_info=self.hparams.use_info)
 
-                        print("Input Template: ")
-                        for i in input_template:
-                            print(i.encode('utf8'))
-                        print("")
-                        print("Output Template: ")
-                        for i in output_template:
-                            print(i.encode('utf8'))
-                        print("")
+                        # print("Input Template: ")
+                        # for i in input_template:
+                        #     print(i.encode('utf8'))
+                        # print("")
+                        # print("Output Template: ")
+                        # for i in output_template:
+                        #     print(i.encode('utf8'))
+                        # print("")
                         assert 0 == 1
                         # max_tokens = max(len(context) + len(input_template) +2, max_tokens)
                         #     # print(len(context) + len(input_template) +2 ) 

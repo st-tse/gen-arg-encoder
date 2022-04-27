@@ -134,13 +134,11 @@ class RAMSDataModule(pl.LightningDataModule):
         # also need to change this for pad
         #removes numbering
         output_template = re.sub(r'<arg\d>','<arg>', template ) 
-        
 
         space_tokenized_template = output_template.split(' ')
 
         tokenized_template = [] 
         tokenized_input_template = []
-
        
         for w in space_tokenized_template:
             t = self.tokenizer.tokenize(w)
@@ -233,6 +231,8 @@ class RAMSDataModule(pl.LightningDataModule):
 
         # print(tokenized_input_template)
         # print(tokenized_template)
+
+        assert 0 == 1
         return tokenized_input_template, tokenized_template, context
 
     def load_ontology(self):
