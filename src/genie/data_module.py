@@ -232,7 +232,6 @@ class RAMSDataModule(pl.LightningDataModule):
         # print(tokenized_input_template)
         # print(tokenized_template)
 
-        assert 0 == 1
         return tokenized_input_template, tokenized_template, context
 
     def load_ontology(self):
@@ -299,13 +298,11 @@ class RAMSDataModule(pl.LightningDataModule):
                         #not sure if reversal here is required
                         input_tokens = self.tokenizer.encode_plus(context, input_template,
                                 add_special_tokens=True,
-                                add_prefix_space=True,
                                 max_length=MAX_LENGTH,
                                 truncation='only_first',
                                 padding='max_length')
                         tgt_tokens = self.tokenizer.encode_plus(context, output_template,
                                 add_special_tokens=True,
-                                add_prefix_space=True, 
                                 max_length=MAX_LENGTH,
                                 truncation='only_first',
                                 padding='max_length')

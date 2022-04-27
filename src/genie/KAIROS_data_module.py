@@ -282,13 +282,13 @@ class KAIROSDataModule(pl.LightningDataModule):
         trigger['start'] = trigger['start'] - offset 
         trigger['end'] = trigger['end'] - offset 
         if mark_trigger:
-            prefix = self.tokenizer.tokenize(' '.join(context_words[:trigger['start']]), add_prefix_space=True) 
-            tgt = self.tokenizer.tokenize(' '.join(context_words[trigger['start']: trigger['end']]), add_prefix_space=True)
+            prefix = self.tokenizer.tokenize(' '.join(context_words[:trigger['start']])) 
+            tgt = self.tokenizer.tokenize(' '.join(context_words[trigger['start']: trigger['end']]))
             
-            suffix = self.tokenizer.tokenize(' '.join(context_words[trigger['end']:]), add_prefix_space=True)
+            suffix = self.tokenizer.tokenize(' '.join(context_words[trigger['end']:]))
             context = prefix + [' <tgr>', ] + tgt + [' <tgr>', ] + suffix 
         else:
-            context = self.tokenizer.tokenize(' '.join(context_words), add_prefix_space=True)
+            context = self.tokenizer.tokenize(' '.join(context_words))
 
         output_template = re.sub(r'<arg\d>','<arg>', template ) 
         space_tokenized_template = output_template.split()
@@ -394,10 +394,10 @@ class KAIROSDataModule(pl.LightningDataModule):
         for arg_idx, text_list in arg_idx2text.items():
             text = ' and '.join(text_list)
             template = re.sub('<{}>'.format(arg_idx), text, template)
-            for w in text_list:
-                arg_list[int(arg_idx[3:])-1].extend(self.tokenizer.tokenize(w))
-
-        print(arg_list)
+            ind = int(arg_idx[3:])
+            if ind <= arg_count:
+                for w in text_list:
+                    arg_list[ind-1].extend(self.tokenizer.tokenize(w))
 
         trigger = ex['event_mentions'][index]['trigger']
         offset = 0 
@@ -447,13 +447,13 @@ class KAIROSDataModule(pl.LightningDataModule):
         trigger['start'] = trigger['start'] - offset 
         trigger['end'] = trigger['end'] - offset 
         if mark_trigger:
-            prefix = self.tokenizer.tokenize(' '.join(context_words[:trigger['start']]), add_prefix_space=True) 
-            tgt = self.tokenizer.tokenize(' '.join(context_words[trigger['start']: trigger['end']]), add_prefix_space=True)
+            prefix = self.tokenizer.tokenize(' '.join(context_words[:trigger['start']])) 
+            tgt = self.tokenizer.tokenize(' '.join(context_words[trigger['start']: trigger['end']]))
             
-            suffix = self.tokenizer.tokenize(' '.join(context_words[trigger['end']:]), add_prefix_space=True)
+            suffix = self.tokenizer.tokenize(' '.join(context_words[trigger['end']:]))
             context = prefix + [' <tgr>', ] + tgt + [' <tgr>', ] + suffix 
         else:
-            context = self.tokenizer.tokenize(' '.join(context_words), add_prefix_space=True)
+            context = self.tokenizer.tokenize(' '.join(context_words))
 
         tokenized_template = [] 
 
@@ -531,54 +531,54 @@ class KAIROSDataModule(pl.LightningDataModule):
                         # for i in output_template:
                         #     print(i.encode('utf8'))
                         # print("")
-                        assert 0 == 1
+                        # assert 0 == 1
                         # max_tokens = max(len(context) + len(input_template) +2, max_tokens)
                         #     # print(len(context) + len(input_template) +2 ) 
                         # max_tgt = max(len(output_template) +1 , max_tgt)
                         # # assert(len(output_template) < MAX_TGT_LENGTH)
 
-                        # if self.hparams.model in ['gen', 'constrained-gen']:
-                        # input_tokens = self.tokenizer.encode_plus(input_template, context, 
-                        #         add_special_tokens=True,
-                        #         add_prefix_space=True,
-                        #         max_length=MAX_LENGTH,
-                        #         truncation='only_second',
-                        #         padding='max_length')
-                        # tgt_tokens = self.tokenizer.encode_plus(output_template, 
-                        # add_special_tokens=True,
-                        # add_prefix_space=True, 
-                        # max_length=MAX_TGT_LENGTH,
-                        # truncation=True,
-                        # padding='max_length')
-                        # else:
-                        #     input_tokens = self.tokenizer.encode_plus(context, input_template,
-                        #             add_special_tokens=True,
-                        #             add_prefix_space=True,
-                        #             max_length=MAX_LENGTH,
-                        #             truncation='only_first',
-                        #             padding='max_length')
-                        #     tgt_tokens = self.tokenizer.encode_plus(context, output_template, 
-                        #     add_special_tokens=True,
-                        #     add_prefix_space=True, 
-                        #     max_length=MAX_LENGTH,
-                        #     truncation='only_first',
-                        #     padding='max_length')
+                        if self.hparams.model in ['gen', 'constrained-gen']:
+                            input_tokens = self.tokenizer.encode_plus(input_template, context, 
+                                    add_special_tokens=True,
+                                    add_prefix_space=True,
+                                    max_length=MAX_LENGTH,
+                                    truncation='only_second',
+                                    padding='max_length')
+                            tgt_tokens = self.tokenizer.encode_plus(output_template, 
+                            add_special_tokens=True,
+                            add_prefix_space=True, 
+                            max_length=MAX_TGT_LENGTH,
+                            truncation=True,
+                            padding='max_length')
+                        else:
+                            input_tokens = self.tokenizer.encode_plus(context, input_template,
+                                    add_special_tokens=True,
+                                    add_prefix_space=True,
+                                    max_length=MAX_LENGTH,
+                                    truncation='only_first',
+                                    padding='max_length')
+                            tgt_tokens = self.tokenizer.encode_plus(context, output_template, 
+                            add_special_tokens=True,
+                            add_prefix_space=True, 
+                            max_length=MAX_LENGTH,
+                            truncation='only_first',
+                            padding='max_length')
 
 
-                        # if (len(input_template) != len(output_template)) and (self.hparams.model in ['oracle', 'padded']):
-                        #     print("Input template:", input_template)
-                        #     print("Output template:", output_template)
-                        #     ind += 1
-                        # else:
-                        # processed_ex = {
-                        #     'event_idx': i, 
-                        #     'doc_key': ex['doc_id'], 
-                        #     'input_token_ids':input_tokens['input_ids'],
-                        #     'input_attn_mask': input_tokens['attention_mask'],
-                        #     'tgt_token_ids': tgt_tokens['input_ids'],
-                        #     'tgt_attn_mask': tgt_tokens['attention_mask'],
-                        # }
-                        # writer.write(json.dumps(processed_ex) + '\n')
+                        if (len(input_template) != len(output_template)) and (self.hparams.model in ['oracle', 'padded']):
+                            print("Input template:", input_template)
+                            print("Output template:", output_template)
+                            ind += 1
+                        else:
+                            processed_ex = {
+                                'event_idx': i, 
+                                'doc_key': ex['doc_id'], 
+                                'input_token_ids':input_tokens['input_ids'],
+                                'input_attn_mask': input_tokens['attention_mask'],
+                                'tgt_token_ids': tgt_tokens['input_ids'],
+                                'tgt_attn_mask': tgt_tokens['attention_mask'],
+                            }
+                            writer.write(json.dumps(processed_ex) + '\n')
 
             print('Dropped:', ind)
         print('longest context:{}'.format(max_tokens))
