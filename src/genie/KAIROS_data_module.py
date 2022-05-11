@@ -4,6 +4,7 @@ import re
 import random 
 from collections import defaultdict 
 import argparse 
+import numpy as np
 
 import transformers 
 from transformers import BartTokenizer, BertTokenizer
@@ -480,11 +481,102 @@ class KAIROSDataModule(pl.LightningDataModule):
 
     def stats(self):
         ontology_dict = load_ontology(self.hparams.dataset) 
-        max_tokens = 0
-        max_tgt =0 
-
         arg_list = []
+        for split,f in [('train',self.hparams.train_file), ('val',self.hparams.val_file)]:
+            coref_split = 'dev' if split=='val' else split 
+            coref_reader = open(os.path.join(self.hparams.coref_dir, '{}.jsonlines'.format(coref_split)))
+            with open(f,'r') as reader:
+                for line, coref_line in zip(reader, coref_reader):
+                    ex = json.loads(line.strip())
+                    corefs = json.loads(coref_line.strip())
+                    assert(ex['doc_id'] == corefs['doc_key'])
+                    # mapping from entity id to information mention
+                    ent2info = {} 
+                    for cidx, cluster in enumerate(corefs['clusters']):
+                        for eid in cluster:
+                            ent2info[eid] = corefs['informative_mentions'][cidx]
+                        
+                    for i in range(len(ex['event_mentions'])):
+                        if split=='train' and len(ex['event_mentions'][i]['arguments']) ==0:
+                            # skip mentions with no arguments 
+                            continue 
+                        evt_type = ex['event_mentions'][i]['event_type']
 
+                        if evt_type not in ontology_dict: # should be a rare event type 
+                            continue 
+
+                        index=i
+                        ent2info=ent2info
+                        use_info=self.hparams.use_info
+
+                        if use_info and ent2info==None:
+                            raise ValueError('entity to informative mention mapping required.')
+
+                        evt_type = ex['event_mentions'][index]['event_type']
+
+                        
+                        template = ontology_dict[evt_type]['template']
+                        input_template = re.sub(r'<arg\d>', '<arg>', template) 
+
+
+                        space_tokenized_input_template = input_template.split()
+                        tokenized_input_template = [] 
+                        for w in space_tokenized_input_template:
+                            tokenized_input_template.extend(self.tokenizer.tokenize(w))
+                        
+                        role2arg = defaultdict(list)
+
+                        for argument in ex['event_mentions'][index]['arguments']:
+                            role2arg[argument['role']].append(argument)
+
+                        role2arg = dict(role2arg)
+
+                        # create output template 
+                        arg_idx2text = defaultdict(list)
+                        for role in role2arg.keys():
+                            if role not in ontology_dict[evt_type]:
+                                # annotation error 
+                                continue 
+                            for i, argument in enumerate(role2arg[role]):
+                                use_arg = True 
+                                if use_info:
+                                    ent_id = argument['entity_id']
+                                    if ent_id in ent2info:
+                                        arg_text = clean_mention(ent2info[ent_id])
+                                        if check_pronoun(arg_text):
+                                            # skipping this argument 
+                                            use_arg = False 
+                                        # if arg_text != argument['text']:
+                                            # print('Original mention:{}, Informative mention:{}'.format(argument['text'], arg_text))
+                                    else:
+                                        arg_text = argument['text']
+                                else:
+                                    arg_text = argument['text']
+                                
+                                # assign the argument index 
+                                if i < len(ontology_dict[evt_type][role]):
+                                    # enough slots to fill in 
+                                    arg_idx = ontology_dict[evt_type][role][i]
+                                    
+                                else:
+                                    # multiple participants for the same role 
+                                    arg_idx = ontology_dict[evt_type][role][-1]
+
+                                if use_arg:
+                                    arg_idx2text[arg_idx].append(arg_text)
+                        
+                        for arg_idx, text_list in arg_idx2text.items():
+                            text = ' and '.join(text_list)
+                            for arg in text_list:
+                                arg_list.append(len(arg.split(' ')))
+                            template = re.sub('<{}>'.format(arg_idx), text, template)
+
+
+
+        print('avg:', np.average(arg_list))
+        print('max:', np.max(arg_list))
+        print('std:', np.std(arg_list))
+        print('median:', np.median(arg_list))
 
             
     def prepare_data(self):
@@ -636,7 +728,6 @@ if __name__ == '__main__':
     parser.add_argument(
         "--model", 
         type=str, 
-        required=True,
         choices=['gen','constrained-gen','padded','oracle']
     )
     parser.add_argument("--pad", type=int, default=1, help = "arg span for padded encoder version, default is 1 for single version")
@@ -645,7 +736,11 @@ if __name__ == '__main__':
     
 
     dm = KAIROSDataModule(args=args)
-    dm.prepare_data() 
+
+    if args.stats:
+        dm.stats()
+    else:
+        dm.prepare_data() 
 
     print('Data prep done')
 
