@@ -477,6 +477,15 @@ class KAIROSDataModule(pl.LightningDataModule):
                 arg_ind += 1
         
         return tokenized_input_template, tokenized_template, context
+
+    def stats(self):
+        ontology_dict = load_ontology(self.hparams.dataset) 
+        max_tokens = 0
+        max_tgt =0 
+
+        arg_list = []
+
+
             
     def prepare_data(self):
         data_dir = 'preprocessed_{}'.format(self.hparams.dataset)
@@ -512,7 +521,7 @@ class KAIROSDataModule(pl.LightningDataModule):
 
                         if evt_type not in ontology_dict: # should be a rare event type 
                             continue 
-                        
+                            
                         if self.hparams.model in ['gen', 'constrained-gen']:
                             input_template, output_template, context= self.create_gold_gen(ex, ontology_dict, self.hparams.mark_trigger, 
                                 index=i, ent2info=ent2info, use_info=self.hparams.use_info)
@@ -631,7 +640,9 @@ if __name__ == '__main__':
         choices=['gen','constrained-gen','padded','oracle']
     )
     parser.add_argument("--pad", type=int, default=1, help = "arg span for padded encoder version, default is 1 for single version")
+    parser.add_argument("--stats", type=bool, default = False)
     args = parser.parse_args() 
+    
 
     dm = KAIROSDataModule(args=args)
     dm.prepare_data() 

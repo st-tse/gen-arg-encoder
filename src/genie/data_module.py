@@ -6,6 +6,7 @@ import random
 from collections import defaultdict 
 import argparse 
 
+import numpy as np
 import transformers 
 from transformers import BartTokenizer, BertTokenizer
 import torch 
@@ -258,6 +259,26 @@ class RAMSDataModule(pl.LightningDataModule):
         
         return ontology_dict 
 
+    def stats(self):
+
+        arg_list = []
+        
+        for split,f in [('train',self.hparams.train_file), ('val',self.hparams.val_file)]:
+             with open(f,'r') as reader:
+                for lidx, line in enumerate(reader):
+                    ex = json.loads(line.strip())
+                    for triple in ex['gold_evt_links']:
+                        trigger_span, argument_span, arg_name = triple 
+                        arg_list.append(argument_span[1] - argument_span[0] + 1)
+
+        print('avg:', np.average(arg_list))
+        print('max:', np.max(arg_list))
+        print('std:', np.std(arg_list))
+        print('median:', np.median(arg_list))
+
+
+
+
     def prepare_data(self):
         if not os.path.exists('preprocessed_data'):
             os.makedirs('preprocessed_data')
@@ -367,16 +388,20 @@ if __name__ == '__main__':
     parser.add_argument(
         "--model", 
         type=str, 
-        required=True,
         choices=['gen','constrained-gen','padded','oracle']
     )
     parser.add_argument("--pad", type=int, default=1, help = "arg span for padded encoder version, default is 1 for single version")
+    parser.add_argument("--stats", type=bool, default = False)
     args = parser.parse_args() 
 
     print('ARGS PARSED')
 
     dm = RAMSDataModule(args=args)
-    dm.prepare_data() 
+
+    if args.stats:
+        dm.stats()
+    else:
+        dm.prepare_data() 
 
     print('DONE')
 
