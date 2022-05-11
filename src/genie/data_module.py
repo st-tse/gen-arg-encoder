@@ -14,9 +14,9 @@ import pytorch_lightning as pl
 import sys
 import copy
 
-from .data import IEDataset, my_collate #temp remove .
+from data import IEDataset, my_collate #temp remove .
 
-MAX_LENGTH=424 
+MAX_LENGTH=512 
 MAX_TGT_LENGTH=72
 DOC_STRIDE=256 
 

@@ -240,6 +240,7 @@ class ArgBERTDataset(BERTDataset):
     def __init__(self, corpus_path, tokenizer, seq_len, encoding="utf-8", corpus_lines=None, on_memory=True):
         self.vocab = tokenizer.vocab
         self.tokenizer = tokenizer
+        self.tokenizer.add_tokens(['<arg>'])
         self.seq_len = seq_len
         self.on_memory = on_memory
         self.corpus_lines = corpus_lines  # number of non-empty lines in input corpus
@@ -267,6 +268,58 @@ class ArgBERTDataset(BERTDataset):
                 self.corpus_lines += 1
 
         self.num_docs = len(self.all_docs)
+
+        def __len__(self):
+            return self.num_docs
+
+        def __getitem__(self, item):
+            cur_id = self.sample_counter
+            self.sample_count += 1
+
+            cur_features = get_arg_features(cur_example)
+
+            cur_tensors = (torch.tensor(cur_features.input_ids),
+                        torch.tensor(cur_features.input_mask),
+                        torch.tensor(cur_features.segment_ids),
+                        torch.tensor(cur_features.lm_label_ids),
+                        torch.tensor(cur_features.is_next))
+
+        return cur_tensors
+
+def get_arg_features(example, max_seq_length):
+    input_tokens = example['input_token_ids']
+    tgt_tokens = example['tgt_token_ids']
+    lbl_mask = example['mask']
+
+    tokens = []
+    segment_ids = []
+    lbl_ids = []
+
+    tokens.append('[CLS]')
+    segment_ids.append(0)
+    lbl_ids.append(-1)
+
+    tokens.extend(input_tokens)
+    segment_ids.extend([0] * len(input_tokens))
+    lbl_ids.extend(lbl_mask)
+
+    tokens.append('[SEP]')
+    segment_ids.append(1)
+    lbl_ids.append(-1)
+
+    #Not sure what has to be done about padding
+    # are input id's the embeddings?
+
+    features = InputFeatures(input_ids=input_ids,
+                             input_mask=input_mask,
+                             segment_ids=segment_ids,
+                             lm_label_ids=lm_label_ids,
+                             is_next=example.is_next)
+
+    return features
+
+
+
 
 class InputExample(object):
     """A single training/test example for the language model."""
