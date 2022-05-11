@@ -1,6 +1,5 @@
 checkpoints/
 logs/
 data/
-preprocessed_*/
 __pycache__/
 BACKUP_DATA/*
