@@ -275,6 +275,7 @@ class RAMSDataModule(pl.LightningDataModule):
         print('max:', np.max(arg_list))
         print('std:', np.std(arg_list))
         print('median:', np.median(arg_list))
+        print('dist:', len([i for i in arg_list if i <= 1]) / len(arg_list))
 
 
 
